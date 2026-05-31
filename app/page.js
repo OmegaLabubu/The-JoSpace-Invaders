@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 
 const BASE_COOLDOWN_MS = 500;
-const MIN_COOLDOWN_MS = 200;
+const MIN_COOLDOWN_MS = 100;
 const COOLDOWN_STEP = 50;
 const BASE_DAMAGE = 20;
+const BASE_NORMAL_HEALTH = 20;
 const DAMAGE_STEP = 5;
+const MAX_DAMAGE_LEVEL = 1000000000;
 const MAX_LIVES = 3;
 const PLAYER_X = 80;
 const PLAYER_SIZE = 64;
 const PROJECTILE_SPEED = 760;
 const SOLDIER_COOLDOWN_MS = 900;
+const SOLDIER_PROJECTILE_SPEED = PROJECTILE_SPEED;
 const SOLDIER_DAMAGE_RATIO = 0.6;
 const BOSS_WAVE_INTERVAL = 10;
 const BOSS_BASE_HEALTH = 100;
@@ -191,7 +194,7 @@ export default function Home() {
     const maxSpeed = 150 + wave * 12;
     const minDelay = Math.max(260, 920 - wave * 45);
     const maxDelay = Math.max(420, 1250 - wave * 55);
-    const normalHealth = BASE_DAMAGE;
+    const normalHealth = BASE_NORMAL_HEALTH + Math.max(0, wave - 1) * 2;
     const totalToSpawn = isBossWave ? 1 : Math.min(3 + (wave - 1) * 2, 26);
 
     totalToSpawnRef.current = totalToSpawn;
@@ -318,19 +321,38 @@ export default function Home() {
               Math.round(damageRef.current * SOLDIER_DAMAGE_RATIO)
             );
             const soldierX = PLAYER_X - 6;
+            const availableTargets = [...nextRunners];
 
-            soldierSlots.forEach((soldierY, index) => {
-              let target = null;
+            const findNearestTarget = (soldierY, pool, removeTarget) => {
+              let bestIndex = -1;
               let bestDistance = Infinity;
 
-              nextRunners.forEach((runner) => {
+              pool.forEach((runner, index) => {
                 const runnerMid = runner.y + runner.size * 0.5;
                 const distance = Math.abs(runnerMid - soldierY);
                 if (distance < bestDistance) {
                   bestDistance = distance;
-                  target = runner;
+                  bestIndex = index;
                 }
               });
+
+              if (bestIndex < 0) {
+                return null;
+              }
+
+              if (removeTarget) {
+                const [target] = pool.splice(bestIndex, 1);
+                return target ?? null;
+              }
+
+              return pool[bestIndex] ?? null;
+            };
+
+            soldierSlots.forEach((soldierY, index) => {
+              let target = findNearestTarget(soldierY, availableTargets, true);
+              if (!target) {
+                target = findNearestTarget(soldierY, nextRunners, false);
+              }
 
               if (!target) {
                 return;
@@ -338,7 +360,40 @@ export default function Home() {
 
               const targetX = target.x + target.size * 0.5;
               const targetY = target.y + target.size * 0.5;
-              const angle = Math.atan2(targetY - soldierY, targetX - soldierX);
+              const targetVx = -target.speed;
+              const targetVy = 0;
+              const dx = targetX - soldierX;
+              const dy = targetY - soldierY;
+              const speed = SOLDIER_PROJECTILE_SPEED;
+              const a = targetVx * targetVx + targetVy * targetVy - speed * speed;
+              const b = 2 * (dx * targetVx + dy * targetVy);
+              const c = dx * dx + dy * dy;
+              let t = 0;
+
+              if (Math.abs(a) < 0.001) {
+                if (Math.abs(b) > 0.001) {
+                  t = -c / b;
+                }
+              } else {
+                const discriminant = b * b - 4 * a * c;
+                if (discriminant >= 0) {
+                  const sqrt = Math.sqrt(discriminant);
+                  const t1 = (-b - sqrt) / (2 * a);
+                  const t2 = (-b + sqrt) / (2 * a);
+                  t = Math.min(t1, t2);
+                  if (t < 0) {
+                    t = Math.max(t1, t2);
+                  }
+                }
+              }
+
+              if (!Number.isFinite(t) || t <= 0) {
+                t = 0;
+              }
+
+              const aimX = targetX + targetVx * t;
+              const aimY = targetY + targetVy * t;
+              const angle = Math.atan2(aimY - soldierY, aimX - soldierX);
               const angleDeg = (angle * 180) / Math.PI;
               nextAngles[index] = angleDeg;
 
@@ -346,8 +401,8 @@ export default function Home() {
                 id: projectileIdRef.current++,
                 x: soldierX + 30,
                 y: soldierY,
-                vx: Math.cos(angle) * (PROJECTILE_SPEED * 0.85),
-                vy: Math.sin(angle) * (PROJECTILE_SPEED * 0.85),
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
                 angle: angleDeg,
                 damage: soldierDamage,
               });
@@ -455,9 +510,10 @@ export default function Home() {
   const cooldownFill = 1 - cooldownRatio;
   const cooldownSeconds = (cooldownRemaining / 1000).toFixed(1);
 
-  const canBuyDamage = !gameOver && silver >= damageCost;
-  const canBuyCooldown =
-    !gameOver && silver >= cooldownCost && cooldownMs > MIN_COOLDOWN_MS;
+  const isDamageMaxed = damageLevel >= MAX_DAMAGE_LEVEL;
+  const canBuyDamage = !gameOver && silver >= damageCost && !isDamageMaxed;
+  const isCooldownMaxed = cooldownMs <= MIN_COOLDOWN_MS;
+  const canBuyCooldown = !gameOver && silver >= cooldownCost && !isCooldownMaxed;
   const canBuySoldier =
     !gameOver && silver >= soldierCostSilver && gold >= soldierCostGold;
 
@@ -643,7 +699,9 @@ export default function Home() {
               onClick={handleBuyDamage}
               disabled={!canBuyDamage}
             >
-              Damage +{DAMAGE_STEP} ({damageCost} silver)
+              {isDamageMaxed
+                ? "MAXED OUT"
+                : `Damage +${DAMAGE_STEP} (${damageCost} silver)`}
             </button>
             <button
               type="button"
@@ -651,7 +709,9 @@ export default function Home() {
               onClick={handleBuyCooldown}
               disabled={!canBuyCooldown}
             >
-              Cooldown -{COOLDOWN_STEP}ms ({cooldownCost} silver)
+              {isCooldownMaxed
+                ? "MAXED OUT"
+                : `Cooldown -${COOLDOWN_STEP}ms (${cooldownCost} silver)`}
             </button>
 
             <div className="shop-section">Support</div>
