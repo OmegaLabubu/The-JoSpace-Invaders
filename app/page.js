@@ -16,6 +16,11 @@ const PROJECTILE_SPEED = 760;
 const SOLDIER_COOLDOWN_MS = 900;
 const SOLDIER_PROJECTILE_SPEED = PROJECTILE_SPEED;
 const SOLDIER_DAMAGE_RATIO = 0.6;
+const FULL_AUTO_PROJECTILE_SPEED = PROJECTILE_SPEED * 1.35;
+const FULL_AUTO_SPLASH_DAMAGE = 30;
+const FULL_AUTO_FIRE_INTERVAL = 120;
+const FULL_AUTO_DIRECTIONS = 12;
+const ADMIN_PASSCODE = "7467";
 const BOSS_WAVE_INTERVAL = 10;
 const BOSS_BASE_HEALTH = 100;
 
@@ -52,6 +57,11 @@ export default function Home() {
   const [soldiers, setSoldiers] = useState(0);
   const [soldierAngles, setSoldierAngles] = useState([]);
   const [shopOpen, setShopOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [passcodeOpen, setPasscodeOpen] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [passcodeResolved, setPasscodeResolved] = useState(false);
+  const [fullAutoEnabled, setFullAutoEnabled] = useState(false);
 
   const stageRef = useRef(null);
   const runnerIdRef = useRef(1);
@@ -71,6 +81,7 @@ export default function Home() {
   const soldierShotRef = useRef(0);
   const soldierAnglesRef = useRef([]);
   const shopOpenRef = useRef(false);
+  const fullAutoTimerRef = useRef(null);
 
   const damage = BASE_DAMAGE + (damageLevel - 1) * DAMAGE_STEP;
   const cooldownMs = Math.max(
@@ -142,6 +153,17 @@ export default function Home() {
       setShopOpen(false);
     }
   }, [gameOver]);
+
+  useEffect(() => {
+    if (gameOver) {
+      setPasscodeOpen(false);
+      return;
+    }
+
+    if (wave >= 5 && !passcodeResolved) {
+      setPasscodeOpen(true);
+    }
+  }, [wave, passcodeResolved, gameOver]);
 
   useEffect(() => {
     const tick = window.setInterval(() => {
@@ -443,15 +465,52 @@ export default function Home() {
           }
 
           if (hitIndex >= 0) {
-            const runner = updatedRunners[hitIndex];
-            runner.health -= projectile.damage;
-            if (runner.health <= 0) {
-              if (runner.type === "boss") {
-                goldEarned += 5;
-              } else {
-                silverEarned += 10;
+            if (projectile.explosive) {
+              let targetIndex = hitIndex;
+              const splashDamage =
+                projectile.splashDamage ?? FULL_AUTO_SPLASH_DAMAGE;
+
+              for (let i = updatedRunners.length - 1; i >= 0; i -= 1) {
+                if (i === targetIndex) {
+                  continue;
+                }
+
+                const target = updatedRunners[i];
+                target.health -= splashDamage;
+                if (target.health <= 0) {
+                  if (target.type === "boss") {
+                    goldEarned += 5;
+                  } else {
+                    silverEarned += 10;
+                  }
+                  updatedRunners.splice(i, 1);
+                  if (i < targetIndex) {
+                    targetIndex -= 1;
+                  }
+                }
               }
-              updatedRunners.splice(hitIndex, 1);
+
+              if (updatedRunners[targetIndex]) {
+                const target = updatedRunners[targetIndex];
+                target.health = 0;
+                if (target.type === "boss") {
+                  goldEarned += 5;
+                } else {
+                  silverEarned += 10;
+                }
+                updatedRunners.splice(targetIndex, 1);
+              }
+            } else {
+              const runner = updatedRunners[hitIndex];
+              runner.health -= projectile.damage;
+              if (runner.health <= 0) {
+                if (runner.type === "boss") {
+                  goldEarned += 5;
+                } else {
+                  silverEarned += 10;
+                }
+                updatedRunners.splice(hitIndex, 1);
+              }
             }
           } else {
             remainingProjectiles.push(projectile);
@@ -516,6 +575,55 @@ export default function Home() {
   const canBuyCooldown = !gameOver && silver >= cooldownCost && !isCooldownMaxed;
   const canBuySoldier =
     !gameOver && silver >= soldierCostSilver && gold >= soldierCostGold;
+
+  const spawnFullAutoBurst = () => {
+    const shots = Array.from({ length: FULL_AUTO_DIRECTIONS }, (_, index) => {
+      const angle = (index / FULL_AUTO_DIRECTIONS) * Math.PI * 2;
+      return {
+        id: projectileIdRef.current++,
+        x: PLAYER_X + PLAYER_SIZE * 0.6,
+        y: playerYRef.current,
+        vx: Math.cos(angle) * FULL_AUTO_PROJECTILE_SPEED,
+        vy: Math.sin(angle) * FULL_AUTO_PROJECTILE_SPEED,
+        angle: (angle * 180) / Math.PI,
+        damage: FULL_AUTO_SPLASH_DAMAGE,
+        explosive: true,
+        splashDamage: FULL_AUTO_SPLASH_DAMAGE,
+      };
+    });
+
+    setProjectiles((prev) => {
+      const next = [...prev, ...shots];
+      projectilesRef.current = next;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (fullAutoTimerRef.current) {
+      window.clearInterval(fullAutoTimerRef.current);
+      fullAutoTimerRef.current = null;
+    }
+
+    if (!fullAutoEnabled || gameOver) {
+      return undefined;
+    }
+
+    fullAutoTimerRef.current = window.setInterval(() => {
+      if (gameOver || shopOpenRef.current) {
+        return;
+      }
+
+      spawnFullAutoBurst();
+    }, FULL_AUTO_FIRE_INTERVAL);
+
+    return () => {
+      if (fullAutoTimerRef.current) {
+        window.clearInterval(fullAutoTimerRef.current);
+        fullAutoTimerRef.current = null;
+      }
+    };
+  }, [fullAutoEnabled, gameOver]);
 
   const handleShoot = () => {
     if (gameOver || shopOpen || !canAttack) {
@@ -589,12 +697,55 @@ export default function Home() {
     setSoldiers((prev) => prev + 1);
   };
 
+  const handlePasscodeSubmit = (event) => {
+    event.preventDefault();
+    const trimmed = passcodeInput.trim();
+    setPasscodeResolved(true);
+    setPasscodeOpen(false);
+    setAdminUnlocked(trimmed === ADMIN_PASSCODE);
+    setPasscodeInput("");
+  };
+
+  const handlePasscodeContinue = () => {
+    setPasscodeResolved(true);
+    setPasscodeOpen(false);
+    setPasscodeInput("");
+  };
+
+  const handleAdminSilver = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setSilver((prev) => prev + 1);
+  };
+
+  const handleAdminGold = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setGold((prev) => prev + 5);
+  };
+
+  const handleToggleFullAuto = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setFullAutoEnabled((prev) => !prev);
+  };
+
   const handleRestart = () => {
     if (spawnTimerRef.current) {
       window.clearTimeout(spawnTimerRef.current);
     }
     if (waveTimerRef.current) {
       window.clearTimeout(waveTimerRef.current);
+    }
+    if (fullAutoTimerRef.current) {
+      window.clearInterval(fullAutoTimerRef.current);
+      fullAutoTimerRef.current = null;
     }
 
     runnersRef.current = [];
@@ -616,6 +767,11 @@ export default function Home() {
     setSoldiers(0);
     setShopOpen(false);
     setSoldierAngles([]);
+    setAdminUnlocked(false);
+    setPasscodeOpen(false);
+    setPasscodeInput("");
+    setPasscodeResolved(false);
+    setFullAutoEnabled(false);
   };
 
   const aimAngle = Math.atan2(
@@ -637,6 +793,42 @@ export default function Home() {
       </div>
 
       <div className="wave-pill">Wave {wave}</div>
+
+      {passcodeOpen ? (
+        <div
+          className="shop-overlay"
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerMove={(event) => event.stopPropagation()}
+          onMouseMove={(event) => event.stopPropagation()}
+        >
+          <div
+            className="shop-panel"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="economy-header">Admin Passcode</div>
+            <div className="stat-row">Enter the code to unlock admin tools.</div>
+            <form className="mt-4 flex flex-col gap-3" onSubmit={handlePasscodeSubmit}>
+              <input
+                type="password"
+                value={passcodeInput}
+                onChange={(event) => setPasscodeInput(event.target.value)}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-100 outline-none"
+                placeholder="Passcode"
+              />
+              <button type="submit" className="shop-button">
+                Submit
+              </button>
+              <button
+                type="button"
+                className="shop-button"
+                onClick={handlePasscodeContinue}
+              >
+                Continue
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {bossRunner ? (
         <div className="boss-bar" onPointerDown={(event) => event.stopPropagation()}>
@@ -713,6 +905,39 @@ export default function Home() {
                 ? "MAXED OUT"
                 : `Cooldown -${COOLDOWN_STEP}ms (${cooldownCost} silver)`}
             </button>
+
+            <div className="shop-section">Admin Panel</div>
+            {adminUnlocked ? (
+              <>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={handleAdminSilver}
+                >
+                  +1 Silver
+                </button>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={handleAdminGold}
+                >
+                  +5 Gold
+                </button>
+                <label className="mt-2 flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100">
+                  <span>Full-Auto</span>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-sky-400"
+                    checked={fullAutoEnabled}
+                    onChange={handleToggleFullAuto}
+                  />
+                </label>
+              </>
+            ) : (
+              <div className="shop-hint">
+                Locked until the wave 5 passcode is accepted.
+              </div>
+            )}
 
             <div className="shop-section">Support</div>
             <button
