@@ -1351,35 +1351,38 @@ export default function Home() {
                     onChange={handleToggleFullAuto}
                   />
                 </label>
-
-                <div className="shop-section">Admin Soldiers</div>
-                <button
-                  type="button"
-                  className="shop-button"
-                  onClick={handleHireRocketeer}
-                >
-                  Homing Rocketeer (+1) • {rocketeers}
-                </button>
-                <button
-                  type="button"
-                  className="shop-button"
-                  onClick={handleHireJo}
-                >
-                  Jo Converter (+1) • {joConverters}
-                </button>
-                <button
-                  type="button"
-                  className="shop-button"
-                  onClick={handleHireYou}
-                >
-                  You (+1) • {youAllies}
-                </button>
               </>
             ) : (
               <div className="shop-hint">
                 Locked until the wave 5 passcode is accepted.
               </div>
             )}
+
+            <div className="shop-section">Admin Soldiers</div>
+            <button
+              type="button"
+              className="shop-button"
+              onClick={handleHireRocketeer}
+              disabled={!adminUnlocked}
+            >
+              Homing Rocketeer (+1) • {rocketeers}
+            </button>
+            <button
+              type="button"
+              className="shop-button"
+              onClick={handleHireJo}
+              disabled={!adminUnlocked}
+            >
+              Jo Converter (+1) • {joConverters}
+            </button>
+            <button
+              type="button"
+              className="shop-button"
+              onClick={handleHireYou}
+              disabled={!adminUnlocked}
+            >
+              You (+1) • {youAllies}
+            </button>
 
             <div className="shop-section">Support</div>
             <button
