@@ -10,12 +10,25 @@ const BASE_NORMAL_HEALTH = 20;
 const DAMAGE_STEP = 5;
 const MAX_DAMAGE_LEVEL = 1000000000;
 const MAX_LIVES = 3;
+const HIT_FLASH_MS = 160;
+const ALLY_BASE_HEALTH = 100;
 const PLAYER_X = 80;
 const PLAYER_SIZE = 64;
 const PROJECTILE_SPEED = 760;
 const SOLDIER_COOLDOWN_MS = 900;
 const SOLDIER_PROJECTILE_SPEED = PROJECTILE_SPEED;
 const SOLDIER_DAMAGE_RATIO = 0.6;
+const ROCKETEER_COOLDOWN_MS = 720;
+const ROCKETEER_PROJECTILE_SPEED = PROJECTILE_SPEED * 0.95;
+const ROCKETEER_TURN_RATE = 6;
+const ROCKETEER_DAMAGE = 60;
+const ROCKETEER_EXPLOSION_RADIUS = 90;
+const JO_CONVERT_COOLDOWN_MS = 1100;
+const JO_CONVERT_PROJECTILE_SPEED = PROJECTILE_SPEED * 0.75;
+const JO_PUNCH_DAMAGE = 30;
+const JO_PUNCH_COOLDOWN_MS = 1000;
+const YOU_OFFSET_X = -40;
+const YOU_SPACING = 56;
 const FULL_AUTO_PROJECTILE_SPEED = PROJECTILE_SPEED * 1.35;
 const FULL_AUTO_SPLASH_DAMAGE = 30;
 const FULL_AUTO_FIRE_INTERVAL = 120;
@@ -40,6 +53,57 @@ const buildSoldierPositions = (count, height) => {
   );
 };
 
+const buildCompanionOffsets = (count) => {
+  if (count <= 0) {
+    return [];
+  }
+
+  const totalHeight = (count - 1) * YOU_SPACING;
+  const start = -totalHeight / 2;
+
+  return Array.from({ length: count }, (_, index) => start + index * YOU_SPACING);
+};
+
+const normalizeAngle = (angle) => {
+  let next = angle;
+  const fullTurn = Math.PI * 2;
+
+  while (next > Math.PI) {
+    next -= fullTurn;
+  }
+  while (next < -Math.PI) {
+    next += fullTurn;
+  }
+
+  return next;
+};
+
+const findNearestRunner = (x, y, runners) => {
+  let bestRunner = null;
+  let bestDistance = Infinity;
+
+  runners.forEach((runner) => {
+    const runnerX = runner.x + runner.size * 0.5;
+    const runnerY = runner.y + runner.size * 0.5;
+    const dx = runnerX - x;
+    const dy = runnerY - y;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestRunner = runner;
+    }
+  });
+
+  return bestRunner;
+};
+
+const runnersOverlap = (first, second) =>
+  first.x < second.x + second.size &&
+  first.x + first.size > second.x &&
+  first.y < second.y + second.size &&
+  first.y + first.size > second.y;
+
 export default function Home() {
   const [runners, setRunners] = useState([]);
   const [projectiles, setProjectiles] = useState([]);
@@ -62,6 +126,11 @@ export default function Home() {
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeResolved, setPasscodeResolved] = useState(false);
   const [fullAutoEnabled, setFullAutoEnabled] = useState(false);
+  const [rocketeers, setRocketeers] = useState(0);
+  const [rocketeerAngles, setRocketeerAngles] = useState([]);
+  const [joConverters, setJoConverters] = useState(0);
+  const [joAngles, setJoAngles] = useState([]);
+  const [youAllies, setYouAllies] = useState(0);
 
   const stageRef = useRef(null);
   const runnerIdRef = useRef(1);
@@ -82,6 +151,12 @@ export default function Home() {
   const soldierAnglesRef = useRef([]);
   const shopOpenRef = useRef(false);
   const fullAutoTimerRef = useRef(null);
+  const rocketeersRef = useRef(0);
+  const rocketeerShotRef = useRef(0);
+  const rocketeerAnglesRef = useRef([]);
+  const joConvertersRef = useRef(0);
+  const joShotRef = useRef(0);
+  const joAnglesRef = useRef([]);
 
   const damage = BASE_DAMAGE + (damageLevel - 1) * DAMAGE_STEP;
   const cooldownMs = Math.max(
@@ -94,6 +169,12 @@ export default function Home() {
   const soldierCostGold = Math.floor(soldiers / 2);
 
   const soldierPositions = buildSoldierPositions(soldiers, sizeRef.current.height);
+  const rocketeerPositions = buildSoldierPositions(
+    rocketeers,
+    sizeRef.current.height
+  );
+  const joPositions = buildSoldierPositions(joConverters, sizeRef.current.height);
+  const youOffsets = buildCompanionOffsets(youAllies);
   const isBossWave = wave % BOSS_WAVE_INTERVAL === 0;
   const bossRunner = runners.find((runner) => runner.type === "boss");
   const bossHealthRatio = bossRunner
@@ -105,12 +186,36 @@ export default function Home() {
   }, [soldiers]);
 
   useEffect(() => {
+    rocketeersRef.current = rocketeers;
+  }, [rocketeers]);
+
+  useEffect(() => {
+    joConvertersRef.current = joConverters;
+  }, [joConverters]);
+
+  useEffect(() => {
     setSoldierAngles((prev) => {
       const next = Array.from({ length: soldiers }, (_, index) => prev[index] ?? 0);
       soldierAnglesRef.current = next;
       return next;
     });
   }, [soldiers]);
+
+  useEffect(() => {
+    setRocketeerAngles((prev) => {
+      const next = Array.from({ length: rocketeers }, (_, index) => prev[index] ?? 0);
+      rocketeerAnglesRef.current = next;
+      return next;
+    });
+  }, [rocketeers]);
+
+  useEffect(() => {
+    setJoAngles((prev) => {
+      const next = Array.from({ length: joConverters }, (_, index) => prev[index] ?? 0);
+      joAnglesRef.current = next;
+      return next;
+    });
+  }, [joConverters]);
 
   useEffect(() => {
     damageRef.current = damage;
@@ -129,6 +234,14 @@ export default function Home() {
   useEffect(() => {
     soldierAnglesRef.current = soldierAngles;
   }, [soldierAngles]);
+
+  useEffect(() => {
+    rocketeerAnglesRef.current = rocketeerAngles;
+  }, [rocketeerAngles]);
+
+  useEffect(() => {
+    joAnglesRef.current = joAngles;
+  }, [joAngles]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -249,6 +362,7 @@ export default function Home() {
           ? randomBetween(52, 70) + wave * 1.5
           : randomBetween(minSpeed, maxSpeed),
         type: isBossWave ? "boss" : "normal",
+        allegiance: "enemy",
         health: isBossWave ? bossHealth : normalHealth,
         maxHealth: isBossWave ? bossHealth : normalHealth,
       };
@@ -301,11 +415,21 @@ export default function Home() {
         let lostLives = 0;
 
         let nextRunners = runnersRef.current
-          .map((runner) => ({
-            ...runner,
-            x: runner.x - runner.speed * delta,
-          }))
+          .map((runner) => {
+            const direction = runner.allegiance === "ally" ? 1 : -1;
+            return {
+              ...runner,
+              x: runner.x + direction * runner.speed * delta,
+            };
+          })
           .filter((runner) => {
+            if (runner.allegiance === "ally") {
+              if (runner.x - runner.size > width + 120) {
+                return false;
+              }
+              return true;
+            }
+
             if (runner.x + runner.size < 0) {
               lostLives += 1;
               return false;
@@ -313,12 +437,69 @@ export default function Home() {
             return true;
           });
 
+        const enemyRunners = nextRunners.filter(
+          (runner) => runner.allegiance !== "ally"
+        );
+
+        const findNearestTarget = (unitY, pool, removeTarget) => {
+          let bestIndex = -1;
+          let bestDistance = Infinity;
+
+          pool.forEach((runner, index) => {
+            const runnerMid = runner.y + runner.size * 0.5;
+            const distance = Math.abs(runnerMid - unitY);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestIndex = index;
+            }
+          });
+
+          if (bestIndex < 0) {
+            return null;
+          }
+
+          if (removeTarget) {
+            const [target] = pool.splice(bestIndex, 1);
+            return target ?? null;
+          }
+
+          return pool[bestIndex] ?? null;
+        };
+
         let nextProjectiles = projectilesRef.current
-          .map((projectile) => ({
-            ...projectile,
-            x: projectile.x + projectile.vx * delta,
-            y: projectile.y + projectile.vy * delta,
-          }))
+          .map((projectile) => {
+            let next = { ...projectile };
+
+            if (next.homing && enemyRunners.length > 0) {
+              let target = enemyRunners.find((runner) => runner.id === next.targetId);
+              if (!target) {
+                target = findNearestRunner(next.x, next.y, enemyRunners);
+                if (target) {
+                  next.targetId = target.id;
+                }
+              }
+
+              if (target) {
+                const targetX = target.x + target.size * 0.5;
+                const targetY = target.y + target.size * 0.5;
+                const desiredAngle = Math.atan2(targetY - next.y, targetX - next.x);
+                const currentAngle = Math.atan2(next.vy, next.vx);
+                const turnRate = next.turnRate ?? ROCKETEER_TURN_RATE;
+                const maxTurn = turnRate * delta;
+                const deltaAngle = normalizeAngle(desiredAngle - currentAngle);
+                const nextAngle = currentAngle + clamp(deltaAngle, -maxTurn, maxTurn);
+                const speed = next.speed ?? ROCKETEER_PROJECTILE_SPEED;
+
+                next.vx = Math.cos(nextAngle) * speed;
+                next.vy = Math.sin(nextAngle) * speed;
+                next.angle = (nextAngle * 180) / Math.PI;
+              }
+            }
+
+            next.x += next.vx * delta;
+            next.y += next.vy * delta;
+            return next;
+          })
           .filter(
             (projectile) =>
               projectile.x > -40 &&
@@ -327,7 +508,7 @@ export default function Home() {
               projectile.y < height + 40
           );
 
-        if (soldiersRef.current > 0 && nextRunners.length > 0) {
+        if (soldiersRef.current > 0 && enemyRunners.length > 0) {
           if (time - soldierShotRef.current >= SOLDIER_COOLDOWN_MS) {
             const soldierSlots = buildSoldierPositions(
               soldiersRef.current,
@@ -343,37 +524,12 @@ export default function Home() {
               Math.round(damageRef.current * SOLDIER_DAMAGE_RATIO)
             );
             const soldierX = PLAYER_X - 6;
-            const availableTargets = [...nextRunners];
-
-            const findNearestTarget = (soldierY, pool, removeTarget) => {
-              let bestIndex = -1;
-              let bestDistance = Infinity;
-
-              pool.forEach((runner, index) => {
-                const runnerMid = runner.y + runner.size * 0.5;
-                const distance = Math.abs(runnerMid - soldierY);
-                if (distance < bestDistance) {
-                  bestDistance = distance;
-                  bestIndex = index;
-                }
-              });
-
-              if (bestIndex < 0) {
-                return null;
-              }
-
-              if (removeTarget) {
-                const [target] = pool.splice(bestIndex, 1);
-                return target ?? null;
-              }
-
-              return pool[bestIndex] ?? null;
-            };
+            const availableTargets = [...enemyRunners];
 
             soldierSlots.forEach((soldierY, index) => {
               let target = findNearestTarget(soldierY, availableTargets, true);
               if (!target) {
-                target = findNearestTarget(soldierY, nextRunners, false);
+                target = findNearestTarget(soldierY, enemyRunners, false);
               }
 
               if (!target) {
@@ -443,16 +599,189 @@ export default function Home() {
           }
         }
 
+        if (rocketeersRef.current > 0 && enemyRunners.length > 0) {
+          if (time - rocketeerShotRef.current >= ROCKETEER_COOLDOWN_MS) {
+            const rocketeerSlots = buildSoldierPositions(
+              rocketeersRef.current,
+              height
+            );
+            const newShots = [];
+            const previousAngles = rocketeerAnglesRef.current;
+            const nextAngles = rocketeerSlots.map(
+              (_, index) => previousAngles[index] ?? 0
+            );
+            const rocketDamage = ROCKETEER_DAMAGE;
+            const rocketeerX = PLAYER_X - 24;
+            const availableTargets = [...enemyRunners];
+
+            rocketeerSlots.forEach((rocketeerY, index) => {
+              let target = findNearestTarget(rocketeerY, availableTargets, true);
+              if (!target) {
+                target = findNearestTarget(rocketeerY, enemyRunners, false);
+              }
+
+              if (!target) {
+                return;
+              }
+
+              const targetX = target.x + target.size * 0.5;
+              const targetY = target.y + target.size * 0.5;
+              const angle = Math.atan2(targetY - rocketeerY, targetX - rocketeerX);
+              const angleDeg = (angle * 180) / Math.PI;
+              nextAngles[index] = angleDeg;
+
+              newShots.push({
+                id: projectileIdRef.current++,
+                x: rocketeerX + 30,
+                y: rocketeerY,
+                vx: Math.cos(angle) * ROCKETEER_PROJECTILE_SPEED,
+                vy: Math.sin(angle) * ROCKETEER_PROJECTILE_SPEED,
+                angle: angleDeg,
+                damage: rocketDamage,
+                explosive: true,
+                splashDamage: rocketDamage,
+                explosionRadius: ROCKETEER_EXPLOSION_RADIUS,
+                homing: true,
+                speed: ROCKETEER_PROJECTILE_SPEED,
+                turnRate: ROCKETEER_TURN_RATE,
+                targetId: target.id,
+              });
+            });
+
+            if (nextAngles.length > 0) {
+              rocketeerAnglesRef.current = nextAngles;
+              setRocketeerAngles(nextAngles);
+            }
+
+            if (newShots.length > 0) {
+              nextProjectiles = [...nextProjectiles, ...newShots];
+            }
+
+            rocketeerShotRef.current = time;
+          }
+        }
+
+        if (joConvertersRef.current > 0 && enemyRunners.length > 0) {
+          if (time - joShotRef.current >= JO_CONVERT_COOLDOWN_MS) {
+            const joSlots = buildSoldierPositions(joConvertersRef.current, height);
+            const newShots = [];
+            const previousAngles = joAnglesRef.current;
+            const nextAngles = joSlots.map((_, index) => previousAngles[index] ?? 0);
+            const joX = PLAYER_X - 44;
+            const availableTargets = [...enemyRunners];
+
+            joSlots.forEach((joY, index) => {
+              let target = findNearestTarget(joY, availableTargets, true);
+              if (!target) {
+                target = findNearestTarget(joY, enemyRunners, false);
+              }
+
+              if (!target) {
+                return;
+              }
+
+              const targetX = target.x + target.size * 0.5;
+              const targetY = target.y + target.size * 0.5;
+              const angle = Math.atan2(targetY - joY, targetX - joX);
+              const angleDeg = (angle * 180) / Math.PI;
+              nextAngles[index] = angleDeg;
+
+              newShots.push({
+                id: projectileIdRef.current++,
+                x: joX + 24,
+                y: joY,
+                vx: Math.cos(angle) * JO_CONVERT_PROJECTILE_SPEED,
+                vy: Math.sin(angle) * JO_CONVERT_PROJECTILE_SPEED,
+                angle: angleDeg,
+                damage: 0,
+                convert: true,
+              });
+            });
+
+            if (nextAngles.length > 0) {
+              joAnglesRef.current = nextAngles;
+              setJoAngles(nextAngles);
+            }
+
+            if (newShots.length > 0) {
+              nextProjectiles = [...nextProjectiles, ...newShots];
+            }
+
+            joShotRef.current = time;
+          }
+        }
+
         const remainingProjectiles = [];
-        const updatedRunners = [...nextRunners];
+        let updatedRunners = [...nextRunners];
         let silverEarned = 0;
         let goldEarned = 0;
+
+        const allies = updatedRunners.filter(
+          (runner) => runner.allegiance === "ally"
+        );
+        const enemies = updatedRunners.filter(
+          (runner) => runner.allegiance !== "ally"
+        );
+
+        if (allies.length > 0 && enemies.length > 0) {
+          const remainingEnemies = [...enemies];
+          const remainingAllies = [...allies];
+
+          for (let a = remainingAllies.length - 1; a >= 0; a -= 1) {
+            const ally = remainingAllies[a];
+            let allyRemoved = false;
+
+            for (let e = remainingEnemies.length - 1; e >= 0; e -= 1) {
+              const enemy = remainingEnemies[e];
+              if (!runnersOverlap(ally, enemy)) {
+                continue;
+              }
+
+              const allyLastPunch = ally.lastPunchAt ?? 0;
+              if (time - allyLastPunch >= JO_PUNCH_COOLDOWN_MS) {
+                ally.lastPunchAt = time;
+                enemy.health -= JO_PUNCH_DAMAGE;
+                enemy.hitAt = Date.now();
+                if (enemy.health <= 0) {
+                  if (enemy.type === "boss") {
+                    goldEarned += 5;
+                  } else {
+                    silverEarned += 10;
+                  }
+                  remainingEnemies.splice(e, 1);
+                  continue;
+                }
+              }
+
+              const enemyLastPunch = enemy.lastPunchAt ?? 0;
+              if (time - enemyLastPunch >= JO_PUNCH_COOLDOWN_MS) {
+                enemy.lastPunchAt = time;
+                ally.health -= JO_PUNCH_DAMAGE;
+                ally.hitAt = Date.now();
+                if (ally.health <= 0) {
+                  remainingAllies.splice(a, 1);
+                  allyRemoved = true;
+                  break;
+                }
+              }
+            }
+
+            if (allyRemoved) {
+              continue;
+            }
+          }
+
+          updatedRunners = [...remainingAllies, ...remainingEnemies];
+        }
 
         nextProjectiles.forEach((projectile) => {
           let hitIndex = -1;
 
           for (let i = 0; i < updatedRunners.length; i += 1) {
             const runner = updatedRunners[i];
+            if (runner.allegiance === "ally") {
+              continue;
+            }
             if (
               projectile.x > runner.x &&
               projectile.x < runner.x + runner.size &&
@@ -465,44 +794,92 @@ export default function Home() {
           }
 
           if (hitIndex >= 0) {
-            if (projectile.explosive) {
-              let targetIndex = hitIndex;
+            if (projectile.convert) {
+              const runner = updatedRunners[hitIndex];
+              runner.allegiance = "ally";
+              runner.type = "ally";
+              runner.speed = Math.max(60, runner.speed * 0.8);
+              runner.maxHealth = ALLY_BASE_HEALTH;
+              runner.health = ALLY_BASE_HEALTH;
+            } else if (projectile.explosive) {
               const splashDamage =
                 projectile.splashDamage ?? FULL_AUTO_SPLASH_DAMAGE;
+              const explosionRadius = projectile.explosionRadius;
 
-              for (let i = updatedRunners.length - 1; i >= 0; i -= 1) {
-                if (i === targetIndex) {
-                  continue;
-                }
+              if (Number.isFinite(explosionRadius) && explosionRadius > 0) {
+                const impactRunner = updatedRunners[hitIndex];
+                const impactX = impactRunner.x + impactRunner.size * 0.5;
+                const impactY = impactRunner.y + impactRunner.size * 0.5;
 
-                const target = updatedRunners[i];
-                target.health -= splashDamage;
-                if (target.health <= 0) {
-                  if (target.type === "boss") {
-                    goldEarned += 5;
-                  } else {
-                    silverEarned += 10;
+                for (let i = updatedRunners.length - 1; i >= 0; i -= 1) {
+                  const target = updatedRunners[i];
+                  if (target.allegiance === "ally") {
+                    continue;
                   }
-                  updatedRunners.splice(i, 1);
-                  if (i < targetIndex) {
-                    targetIndex -= 1;
+
+                  const targetX = target.x + target.size * 0.5;
+                  const targetY = target.y + target.size * 0.5;
+                  const distance = Math.hypot(targetX - impactX, targetY - impactY);
+
+                  if (distance > explosionRadius) {
+                    continue;
+                  }
+
+                  target.health -= splashDamage;
+                  target.hitAt = Date.now();
+                  if (target.health <= 0) {
+                    if (target.type === "boss") {
+                      goldEarned += 5;
+                    } else {
+                      silverEarned += 10;
+                    }
+                    updatedRunners.splice(i, 1);
                   }
                 }
-              }
+              } else {
+                let targetIndex = hitIndex;
 
-              if (updatedRunners[targetIndex]) {
-                const target = updatedRunners[targetIndex];
-                target.health = 0;
-                if (target.type === "boss") {
-                  goldEarned += 5;
-                } else {
-                  silverEarned += 10;
+                for (let i = updatedRunners.length - 1; i >= 0; i -= 1) {
+                  if (i === targetIndex) {
+                    continue;
+                  }
+
+                  const target = updatedRunners[i];
+                  if (target.allegiance === "ally") {
+                    continue;
+                  }
+                  target.health -= splashDamage;
+                  target.hitAt = Date.now();
+                  if (target.health <= 0) {
+                    if (target.type === "boss") {
+                      goldEarned += 5;
+                    } else {
+                      silverEarned += 10;
+                    }
+                    updatedRunners.splice(i, 1);
+                    if (i < targetIndex) {
+                      targetIndex -= 1;
+                    }
+                  }
                 }
-                updatedRunners.splice(targetIndex, 1);
+
+                if (updatedRunners[targetIndex]) {
+                  const target = updatedRunners[targetIndex];
+                  if (target.allegiance !== "ally") {
+                    target.health = 0;
+                    if (target.type === "boss") {
+                      goldEarned += 5;
+                    } else {
+                      silverEarned += 10;
+                    }
+                    updatedRunners.splice(targetIndex, 1);
+                  }
+                }
               }
             } else {
               const runner = updatedRunners[hitIndex];
               runner.health -= projectile.damage;
+              runner.hitAt = Date.now();
               if (runner.health <= 0) {
                 if (runner.type === "boss") {
                   goldEarned += 5;
@@ -568,6 +945,7 @@ export default function Home() {
   );
   const cooldownFill = 1 - cooldownRatio;
   const cooldownSeconds = (cooldownRemaining / 1000).toFixed(1);
+  const hitFlashCutoff = now - HIT_FLASH_MS;
 
   const isDamageMaxed = damageLevel >= MAX_DAMAGE_LEVEL;
   const canBuyDamage = !gameOver && silver >= damageCost && !isDamageMaxed;
@@ -634,6 +1012,7 @@ export default function Home() {
       mouseRef.current.y - playerYRef.current,
       mouseRef.current.x - PLAYER_X
     );
+    const companionOffsets = buildCompanionOffsets(youAllies);
 
     const projectile = {
       id: projectileIdRef.current++,
@@ -645,9 +1024,20 @@ export default function Home() {
       damage,
     };
 
+    const companionShots = companionOffsets.map((offset) => ({
+      id: projectileIdRef.current++,
+      x: PLAYER_X + YOU_OFFSET_X + PLAYER_SIZE * 0.6,
+      y: playerYRef.current + offset,
+      vx: Math.cos(angle) * PROJECTILE_SPEED,
+      vy: Math.sin(angle) * PROJECTILE_SPEED,
+      angle: (angle * 180) / Math.PI,
+      damage,
+    }));
+    const shots = [projectile, ...companionShots];
+
     setCooldownUntil(Date.now() + cooldownMs);
     setProjectiles((prev) => {
-      const next = [...prev, projectile];
+      const next = [...prev, ...shots];
       projectilesRef.current = next;
       return next;
     });
@@ -695,6 +1085,30 @@ export default function Home() {
     setSilver((prev) => prev - soldierCostSilver);
     setGold((prev) => prev - soldierCostGold);
     setSoldiers((prev) => prev + 1);
+  };
+
+  const handleHireRocketeer = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setRocketeers((prev) => prev + 1);
+  };
+
+  const handleHireJo = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setJoConverters((prev) => prev + 1);
+  };
+
+  const handleHireYou = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    setYouAllies((prev) => prev + 1);
   };
 
   const handlePasscodeSubmit = (event) => {
@@ -767,6 +1181,11 @@ export default function Home() {
     setSoldiers(0);
     setShopOpen(false);
     setSoldierAngles([]);
+    setRocketeers(0);
+    setRocketeerAngles([]);
+    setJoConverters(0);
+    setJoAngles([]);
+    setYouAllies(0);
     setAdminUnlocked(false);
     setPasscodeOpen(false);
     setPasscodeInput("");
@@ -932,6 +1351,29 @@ export default function Home() {
                     onChange={handleToggleFullAuto}
                   />
                 </label>
+
+                <div className="shop-section">Admin Soldiers</div>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={handleHireRocketeer}
+                >
+                  Homing Rocketeer (+1) • {rocketeers}
+                </button>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={handleHireJo}
+                >
+                  Jo Converter (+1) • {joConverters}
+                </button>
+                <button
+                  type="button"
+                  className="shop-button"
+                  onClick={handleHireYou}
+                >
+                  You (+1) • {youAllies}
+                </button>
               </>
             ) : (
               <div className="shop-hint">
@@ -978,6 +1420,23 @@ export default function Home() {
         />
       </div>
 
+      {youOffsets.map((offset, index) => (
+        <div
+          key={`you-${index}`}
+          className="player player-companion"
+          style={{
+            top: `${playerY + offset}px`,
+            left: `${PLAYER_X + YOU_OFFSET_X}px`,
+          }}
+        >
+          <div className="player-core" />
+          <div
+            className="player-barrel"
+            style={{ transform: `translateY(-50%) rotate(${aimDegrees}deg)` }}
+          />
+        </div>
+      ))}
+
       {soldierPositions.map((soldierY, index) => (
         <div
           key={`soldier-${index}`}
@@ -989,6 +1448,38 @@ export default function Home() {
             className="soldier-barrel"
             style={{
               transform: `translateY(-50%) rotate(${soldierAngles[index] ?? 0}deg)`,
+            }}
+          />
+        </div>
+      ))}
+
+      {rocketeerPositions.map((rocketeerY, index) => (
+        <div
+          key={`rocketeer-${index}`}
+          className="soldier"
+          style={{ top: `${rocketeerY}px`, left: `${PLAYER_X - 6}px` }}
+        >
+          <div className="soldier-core" />
+          <div
+            className="soldier-barrel"
+            style={{
+              transform: `translateY(-50%) rotate(${rocketeerAngles[index] ?? 0}deg)`,
+            }}
+          />
+        </div>
+      ))}
+
+      {joPositions.map((joY, index) => (
+        <div
+          key={`jo-${index}`}
+          className="soldier"
+          style={{ top: `${joY}px`, left: `${PLAYER_X - 26}px` }}
+        >
+          <div className="soldier-core" />
+          <div
+            className="soldier-barrel"
+            style={{
+              transform: `translateY(-50%) rotate(${joAngles[index] ?? 0}deg)`,
             }}
           />
         </div>
@@ -1006,19 +1497,36 @@ export default function Home() {
         />
       ))}
 
-      {runners.map((runner) => (
-        <img
-          key={runner.id}
-          src="/jo.png"
-          alt={runner.type === "boss" ? "Boss Jo" : "Jo invader"}
-          className={runner.type === "boss" ? "runner runner-boss" : "runner"}
-          style={{
-            left: `${runner.x}px`,
-            top: `${runner.y}px`,
-            width: `${runner.size}px`,
-          }}
-        />
-      ))}
+      {runners.map((runner) => {
+        const baseClass =
+          runner.allegiance === "ally"
+            ? "runner runner-ally"
+            : runner.type === "boss"
+              ? "runner runner-boss"
+              : "runner";
+        const isHit = runner.hitAt && runner.hitAt >= hitFlashCutoff;
+        const className = isHit ? `${baseClass} runner-hit` : baseClass;
+
+        return (
+          <img
+            key={runner.id}
+            src="/jo.png"
+            alt={
+              runner.allegiance === "ally"
+                ? "Ally Jo"
+                : runner.type === "boss"
+                  ? "Boss Jo"
+                  : "Jo invader"
+            }
+            className={className}
+            style={{
+              left: `${runner.x}px`,
+              top: `${runner.y}px`,
+              width: `${runner.size}px`,
+            }}
+          />
+        );
+      })}
 
       <div
         className="cooldown-card"
