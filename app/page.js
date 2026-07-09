@@ -337,7 +337,7 @@ export default function Home() {
     const maxSpeed = 150 + wave * 12;
     const minDelay = Math.max(260, 920 - wave * 45);
     const maxDelay = Math.max(420, 1250 - wave * 55);
-    const normalHealth = BASE_NORMAL_HEALTH + Math.max(0, wave - 1) * 5;
+    const normalHealth = BASE_NORMAL_HEALTH + Math.max(0, wave - 1) * 3;
     const totalToSpawn = isBossWave ? 1 : Math.min(3 + (wave - 1) * 2, 26);
 
     totalToSpawnRef.current = totalToSpawn;
@@ -361,10 +361,12 @@ export default function Home() {
       const bossHealth =
         BOSS_BASE_HEALTH + Math.max(0, wave - BOSS_WAVE_INTERVAL) * 10;
 
-      const shieldedChance = Math.min(
-        SHIELDED_SPAWN_CHANCE_MAX,
-        SHIELDED_SPAWN_CHANCE_BASE + wave * SHIELDED_SPAWN_CHANCE_PER_WAVE
-      );
+      const shieldedChance = wave >= 26
+        ? Math.min(
+            SHIELDED_SPAWN_CHANCE_MAX,
+            SHIELDED_SPAWN_CHANCE_BASE + (wave - 25) * SHIELDED_SPAWN_CHANCE_PER_WAVE
+          )
+        : 0;
       const isShielded = !isBossWave && Math.random() < shieldedChance;
 
       const runner = {
