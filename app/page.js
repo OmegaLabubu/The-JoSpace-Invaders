@@ -36,6 +36,11 @@ const FULL_AUTO_DIRECTIONS = 12;
 const ADMIN_PASSCODE = "7467";
 const BOSS_WAVE_INTERVAL = 10;
 const BOSS_BASE_HEALTH = 100;
+const SHIELD_MAX_HITS = 4;
+const SHIELD_SHATTER_MS = 900;
+const SHIELDED_SPAWN_CHANCE_BASE = 0.15;
+const SHIELDED_SPAWN_CHANCE_PER_WAVE = 0.02;
+const SHIELDED_SPAWN_CHANCE_MAX = 0.35;
 
 const randomBetween = (min, max) => Math.random() * (max - min) + min;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -131,6 +136,7 @@ export default function Home() {
   const [joConverters, setJoConverters] = useState(0);
   const [joAngles, setJoAngles] = useState([]);
   const [youAllies, setYouAllies] = useState(0);
+  const [shieldFragments, setShieldFragments] = useState([]);
 
   const stageRef = useRef(null);
   const runnerIdRef = useRef(1);
@@ -157,6 +163,8 @@ export default function Home() {
   const joConvertersRef = useRef(0);
   const joShotRef = useRef(0);
   const joAnglesRef = useRef([]);
+  const shieldFragmentsRef = useRef([]);
+  const shieldFragmentIdRef = useRef(1);
 
   const damage = BASE_DAMAGE + (damageLevel - 1) * DAMAGE_STEP;
   const cooldownMs = Math.max(
@@ -329,7 +337,7 @@ export default function Home() {
     const maxSpeed = 150 + wave * 12;
     const minDelay = Math.max(260, 920 - wave * 45);
     const maxDelay = Math.max(420, 1250 - wave * 55);
-    const normalHealth = BASE_NORMAL_HEALTH + Math.max(0, wave - 1) * 2;
+    const normalHealth = BASE_NORMAL_HEALTH + Math.max(0, wave - 1) * 5;
     const totalToSpawn = isBossWave ? 1 : Math.min(3 + (wave - 1) * 2, 26);
 
     totalToSpawnRef.current = totalToSpawn;
@@ -353,6 +361,12 @@ export default function Home() {
       const bossHealth =
         BOSS_BASE_HEALTH + Math.max(0, wave - BOSS_WAVE_INTERVAL) * 10;
 
+      const shieldedChance = Math.min(
+        SHIELDED_SPAWN_CHANCE_MAX,
+        SHIELDED_SPAWN_CHANCE_BASE + wave * SHIELDED_SPAWN_CHANCE_PER_WAVE
+      );
+      const isShielded = !isBossWave && Math.random() < shieldedChance;
+
       const runner = {
         id: runnerIdRef.current++,
         x: width + randomBetween(20, 160),
@@ -361,10 +375,12 @@ export default function Home() {
         speed: isBossWave
           ? randomBetween(52, 70) + wave * 1.5
           : randomBetween(minSpeed, maxSpeed),
-        type: isBossWave ? "boss" : "normal",
+        type: isBossWave ? "boss" : isShielded ? "shielded" : "normal",
         allegiance: "enemy",
         health: isBossWave ? bossHealth : normalHealth,
         maxHealth: isBossWave ? bossHealth : normalHealth,
+        shieldHits: isShielded ? SHIELD_MAX_HITS : 0,
+        shieldHitAt: 0,
       };
 
       setRunners((prev) => {
@@ -464,6 +480,32 @@ export default function Home() {
           }
 
           return pool[bestIndex] ?? null;
+        };
+
+        const consumeShieldHit = (runner) => {
+          if (!runner.shieldHits || runner.shieldHits <= 0) {
+            return false;
+          }
+
+          runner.shieldHits -= 1;
+          runner.shieldHitAt = Date.now();
+
+          if (runner.shieldHits <= 0) {
+            const newFragment = {
+              id: shieldFragmentIdRef.current++,
+              x: runner.x,
+              y: runner.y,
+              size: runner.size,
+              createdAt: Date.now(),
+            };
+            shieldFragmentsRef.current = [
+              ...shieldFragmentsRef.current,
+              newFragment,
+            ];
+            setShieldFragments(shieldFragmentsRef.current);
+          }
+
+          return true;
         };
 
         let nextProjectiles = projectilesRef.current
@@ -740,28 +782,34 @@ export default function Home() {
               const allyLastPunch = ally.lastPunchAt ?? 0;
               if (time - allyLastPunch >= JO_PUNCH_COOLDOWN_MS) {
                 ally.lastPunchAt = time;
-                enemy.health -= JO_PUNCH_DAMAGE;
-                enemy.hitAt = Date.now();
-                if (enemy.health <= 0) {
-                  if (enemy.type === "boss") {
-                    goldEarned += 5;
-                  } else {
-                    silverEarned += 10;
+                if (consumeShieldHit(enemy)) {
+                } else {
+                  enemy.health -= JO_PUNCH_DAMAGE;
+                  enemy.hitAt = Date.now();
+                  if (enemy.health <= 0) {
+                    if (enemy.type === "boss") {
+                      goldEarned += 5;
+                    } else {
+                      silverEarned += 10;
+                    }
+                    remainingEnemies.splice(e, 1);
+                    continue;
                   }
-                  remainingEnemies.splice(e, 1);
-                  continue;
                 }
               }
 
               const enemyLastPunch = enemy.lastPunchAt ?? 0;
               if (time - enemyLastPunch >= JO_PUNCH_COOLDOWN_MS) {
                 enemy.lastPunchAt = time;
-                ally.health -= JO_PUNCH_DAMAGE;
-                ally.hitAt = Date.now();
-                if (ally.health <= 0) {
-                  remainingAllies.splice(a, 1);
-                  allyRemoved = true;
-                  break;
+                if (consumeShieldHit(ally)) {
+                } else {
+                  ally.health -= JO_PUNCH_DAMAGE;
+                  ally.hitAt = Date.now();
+                  if (ally.health <= 0) {
+                    remainingAllies.splice(a, 1);
+                    allyRemoved = true;
+                    break;
+                  }
                 }
               }
             }
@@ -796,11 +844,15 @@ export default function Home() {
           if (hitIndex >= 0) {
             if (projectile.convert) {
               const runner = updatedRunners[hitIndex];
-              runner.allegiance = "ally";
-              runner.type = "ally";
-              runner.speed = Math.max(60, runner.speed * 0.8);
-              runner.maxHealth = ALLY_BASE_HEALTH;
-              runner.health = ALLY_BASE_HEALTH;
+              if (consumeShieldHit(runner)) {
+              } else {
+                runner.allegiance = "ally";
+                runner.type = "ally";
+                runner.speed = Math.max(60, runner.speed * 0.8);
+                runner.maxHealth = ALLY_BASE_HEALTH;
+                runner.health = ALLY_BASE_HEALTH;
+                runner.shieldHits = 0;
+              }
             } else if (projectile.explosive) {
               const splashDamage =
                 projectile.splashDamage ?? FULL_AUTO_SPLASH_DAMAGE;
@@ -825,15 +877,18 @@ export default function Home() {
                     continue;
                   }
 
-                  target.health -= splashDamage;
-                  target.hitAt = Date.now();
-                  if (target.health <= 0) {
-                    if (target.type === "boss") {
-                      goldEarned += 5;
-                    } else {
-                      silverEarned += 10;
+                  if (consumeShieldHit(target)) {
+                  } else {
+                    target.health -= splashDamage;
+                    target.hitAt = Date.now();
+                    if (target.health <= 0) {
+                      if (target.type === "boss") {
+                        goldEarned += 5;
+                      } else {
+                        silverEarned += 10;
+                      }
+                      updatedRunners.splice(i, 1);
                     }
-                    updatedRunners.splice(i, 1);
                   }
                 }
               } else {
@@ -848,17 +903,20 @@ export default function Home() {
                   if (target.allegiance === "ally") {
                     continue;
                   }
-                  target.health -= splashDamage;
-                  target.hitAt = Date.now();
-                  if (target.health <= 0) {
-                    if (target.type === "boss") {
-                      goldEarned += 5;
-                    } else {
-                      silverEarned += 10;
-                    }
-                    updatedRunners.splice(i, 1);
-                    if (i < targetIndex) {
-                      targetIndex -= 1;
+                  if (consumeShieldHit(target)) {
+                  } else {
+                    target.health -= splashDamage;
+                    target.hitAt = Date.now();
+                    if (target.health <= 0) {
+                      if (target.type === "boss") {
+                        goldEarned += 5;
+                      } else {
+                        silverEarned += 10;
+                      }
+                      updatedRunners.splice(i, 1);
+                      if (i < targetIndex) {
+                        targetIndex -= 1;
+                      }
                     }
                   }
                 }
@@ -866,33 +924,48 @@ export default function Home() {
                 if (updatedRunners[targetIndex]) {
                   const target = updatedRunners[targetIndex];
                   if (target.allegiance !== "ally") {
-                    target.health = 0;
-                    if (target.type === "boss") {
-                      goldEarned += 5;
+                    if (consumeShieldHit(target)) {
                     } else {
-                      silverEarned += 10;
+                      target.health = 0;
+                      if (target.type === "boss") {
+                        goldEarned += 5;
+                      } else {
+                        silverEarned += 10;
+                      }
+                      updatedRunners.splice(targetIndex, 1);
                     }
-                    updatedRunners.splice(targetIndex, 1);
                   }
                 }
               }
             } else {
               const runner = updatedRunners[hitIndex];
-              runner.health -= projectile.damage;
-              runner.hitAt = Date.now();
-              if (runner.health <= 0) {
-                if (runner.type === "boss") {
-                  goldEarned += 5;
-                } else {
-                  silverEarned += 10;
+              if (consumeShieldHit(runner)) {
+              } else {
+                runner.health -= projectile.damage;
+                runner.hitAt = Date.now();
+                if (runner.health <= 0) {
+                  if (runner.type === "boss") {
+                    goldEarned += 5;
+                  } else {
+                    silverEarned += 10;
+                  }
+                  updatedRunners.splice(hitIndex, 1);
                 }
-                updatedRunners.splice(hitIndex, 1);
               }
             }
           } else {
             remainingProjectiles.push(projectile);
           }
         });
+
+        const nowMs = Date.now();
+        const prevFragCount = shieldFragmentsRef.current.length;
+        shieldFragmentsRef.current = shieldFragmentsRef.current.filter(
+          (frag) => nowMs - frag.createdAt < SHIELD_SHATTER_MS
+        );
+        if (shieldFragmentsRef.current.length !== prevFragCount) {
+          setShieldFragments(shieldFragmentsRef.current);
+        }
 
         if (silverEarned > 0) {
           setSilver((prev) => prev + silverEarned);
@@ -1164,6 +1237,7 @@ export default function Home() {
 
     runnersRef.current = [];
     projectilesRef.current = [];
+    shieldFragmentsRef.current = [];
     totalToSpawnRef.current = 0;
     spawnedRef.current = 0;
     wavePendingRef.current = false;
@@ -1191,6 +1265,7 @@ export default function Home() {
     setPasscodeInput("");
     setPasscodeResolved(false);
     setFullAutoEnabled(false);
+    setShieldFragments([]);
   };
 
   const aimAngle = Math.atan2(
@@ -1289,7 +1364,7 @@ export default function Home() {
             className="shop-panel"
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <div className="economy-header">Vault</div>
+            <div className="economy-header">Upgrades</div>
             <div className="coin-row">
               <span className="coin coin-silver" />
               <span className="coin-label">{silver} silver</span>
@@ -1508,28 +1583,64 @@ export default function Home() {
               ? "runner runner-boss"
               : "runner";
         const isHit = runner.hitAt && runner.hitAt >= hitFlashCutoff;
-        const className = isHit ? `${baseClass} runner-hit` : baseClass;
+        const isShieldFlash =
+          runner.shieldHitAt && runner.shieldHitAt >= hitFlashCutoff;
+        const className = [
+          baseClass,
+          isHit ? "runner-hit" : "",
+          isShieldFlash ? "runner-shield-hit" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
 
         return (
-          <img
+          <div
             key={runner.id}
-            src="/jo.png"
-            alt={
-              runner.allegiance === "ally"
-                ? "Ally Jo"
-                : runner.type === "boss"
-                  ? "Boss Jo"
-                  : "Jo invader"
-            }
-            className={className}
+            className="runner-wrapper"
             style={{
               left: `${runner.x}px`,
               top: `${runner.y}px`,
               width: `${runner.size}px`,
             }}
-          />
+          >
+            <img
+              src="/jo.png"
+              alt={
+                runner.allegiance === "ally"
+                  ? "Ally Jo"
+                  : runner.type === "boss"
+                    ? "Boss Jo"
+                    : runner.type === "shielded"
+                      ? "Shielded Jo"
+                      : "Jo invader"
+              }
+              className={className}
+            />
+            {runner.shieldHits > 0 ? (
+              <div className="jo-shield">
+                <div className="shield-dots">
+                  {Array.from({ length: runner.shieldHits }).map((_, i) => (
+                    <span key={i} className="shield-dot" />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         );
       })}
+
+      {shieldFragments.map((frag) => (
+        <div
+          key={frag.id}
+          className="shield-fragment"
+          style={{
+            left: `${frag.x}px`,
+            top: `${frag.y}px`,
+            width: `${frag.size}px`,
+            height: `${frag.size}px`,
+          }}
+        />
+      ))}
 
       <div
         className="cooldown-card"

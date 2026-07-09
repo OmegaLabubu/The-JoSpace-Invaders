@@ -56,6 +56,83 @@ body {
     brightness(0.95) sepia(0.6) saturate(6) hue-rotate(-15deg);
 }
 
+.runner-shield-hit {
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.9)) brightness(1.15);
+}
+
+.runner-wrapper {
+  position: absolute;
+  height: auto;
+  pointer-events: none;
+}
+
+.runner-wrapper .runner {
+  position: relative;
+  width: 100%;
+  height: auto;
+  left: 0;
+  top: 0;
+}
+
+.jo-shield {
+  position: absolute;
+  inset: -10%;
+  border-radius: 50%;
+  border: 2px solid rgba(56, 189, 248, 0.5);
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(56, 189, 248, 0.15),
+    rgba(56, 189, 248, 0.04)
+  );
+  box-shadow:
+    0 0 16px rgba(56, 189, 248, 0.25),
+    inset 0 0 16px rgba(56, 189, 248, 0.1);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.shield-dots {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+}
+
+.shield-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #38bdf8;
+  box-shadow: 0 0 4px rgba(56, 189, 248, 0.8);
+}
+
+.shield-fragment {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(56, 189, 248, 0.35);
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(56, 189, 248, 0.12),
+    transparent
+  );
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.2);
+  pointer-events: none;
+  animation: shield-shatter 0.9s ease-out forwards;
+}
+
+@keyframes shield-shatter {
+  0% {
+    opacity: 0.75;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100px) scale(0.5) rotate(25deg);
+  }
+}
+
 .spark {
   position: absolute;
   border-radius: 999px;
