@@ -359,7 +359,14 @@ export default function Home() {
       const topLimit = Math.max(40, height - size - 40);
 
       const bossHealth =
-        BOSS_BASE_HEALTH + Math.max(0, wave - BOSS_WAVE_INTERVAL) * 10;
+        wave === BOSS_WAVE_INTERVAL
+          ? 750
+          : BOSS_BASE_HEALTH + Math.max(0, wave - BOSS_WAVE_INTERVAL) * 10;
+
+      const bossSpeed =
+        wave === BOSS_WAVE_INTERVAL
+          ? (minSpeed + maxSpeed) / 4
+          : randomBetween(52, 70) + wave * 1.5;
 
       const shieldedChance = wave >= 26
         ? Math.min(
@@ -374,9 +381,7 @@ export default function Home() {
         x: width + randomBetween(20, 160),
         y: randomBetween(40, topLimit),
         size,
-        speed: isBossWave
-          ? randomBetween(52, 70) + wave * 1.5
-          : randomBetween(minSpeed, maxSpeed),
+        speed: isBossWave ? bossSpeed : randomBetween(minSpeed, maxSpeed),
         type: isBossWave ? "boss" : isShielded ? "shielded" : "normal",
         allegiance: "enemy",
         health: isBossWave ? bossHealth : normalHealth,
