@@ -137,6 +137,7 @@ export default function Home() {
   const [joAngles, setJoAngles] = useState([]);
   const [youAllies, setYouAllies] = useState(0);
   const [shieldFragments, setShieldFragments] = useState([]);
+  const [skipWaveInput, setSkipWaveInput] = useState("");
 
   const stageRef = useRef(null);
   const runnerIdRef = useRef(1);
@@ -1230,6 +1231,21 @@ export default function Home() {
     setFullAutoEnabled((prev) => !prev);
   };
 
+  const handleSkipWave = () => {
+    if (!adminUnlocked) {
+      return;
+    }
+
+    const targetWave = parseInt(skipWaveInput, 10);
+    if (!Number.isFinite(targetWave) || targetWave < 1) {
+      return;
+    }
+
+    setWave(targetWave);
+    setSkipWaveInput("");
+    setShopOpen(false);
+  };
+
   const handleRestart = () => {
     if (spawnTimerRef.current) {
       window.clearTimeout(spawnTimerRef.current);
@@ -1273,6 +1289,7 @@ export default function Home() {
     setPasscodeResolved(false);
     setFullAutoEnabled(false);
     setShieldFragments([]);
+    setSkipWaveInput("");
   };
 
   const aimAngle = Math.atan2(
@@ -1433,6 +1450,23 @@ export default function Home() {
                     onChange={handleToggleFullAuto}
                   />
                 </label>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={skipWaveInput}
+                    onChange={(event) => setSkipWaveInput(event.target.value)}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                    placeholder="Wave #"
+                  />
+                  <button
+                    type="button"
+                    className="shop-button flex-none px-4"
+                    onClick={handleSkipWave}
+                  >
+                    Skip
+                  </button>
+                </div>
               </>
             ) : (
               <div className="shop-hint">
