@@ -277,17 +277,6 @@ export default function Home() {
   }, [gameOver]);
 
   useEffect(() => {
-    if (gameOver) {
-      setPasscodeOpen(false);
-      return;
-    }
-
-    if (wave >= 5 && !passcodeResolved) {
-      setPasscodeOpen(true);
-    }
-  }, [wave, passcodeResolved, gameOver]);
-
-  useEffect(() => {
     const tick = window.setInterval(() => {
       setNow(Date.now());
     }, 50);
@@ -1470,7 +1459,7 @@ export default function Home() {
               </>
             ) : (
               <div className="shop-hint">
-                Locked until the wave 5 passcode is accepted.
+                Enter passcode to unlock.
               </div>
             )}
 
@@ -1511,6 +1500,15 @@ export default function Home() {
               {soldierCostGold > 0 ? ` + ${soldierCostGold} gold` : ""})
             </button>
             <div className="shop-hint">Press Tab to resume</div>
+            {!adminUnlocked && (
+              <button
+                type="button"
+                className="mt-2 self-end rounded px-2 py-1 text-[10px] text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                onClick={() => setPasscodeOpen(true)}
+              >
+                Admin
+              </button>
+            )}
           </div>
         </div>
       ) : null}
